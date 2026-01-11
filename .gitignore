@@ -1,0 +1,19 @@
+# Ignora Dataset
+data/
+*.json
+*.csv
+
+# Ignora file di sistema Mac
+.DS_Store
+
+# Ignora configurazioni IDE (IntelliJ e PyCharm)
+.idea/
+*.iml
+.vscode/
+
+# Ignora Environment e cache Python
+__pycache__/
+*.pyc
+env/
+venv/
+.ipynb_checkpoints/
