@@ -1,7 +1,7 @@
 import os
-import sys
+
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, year, count
+from pyspark.sql.functions import col, year
 
 
 def init_environment():
