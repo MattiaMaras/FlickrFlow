@@ -1,69 +1,40 @@
 import os
 import shutil
-from pyspark.sql import SparkSession
+
 from pyspark.sql.functions import col, to_timestamp, coalesce, lit
-
-# --- CONFIGURAZIONE ---
-ANALYSIS_CONFIG = {
-    "APP_NAME": "FlickrFlow_Cleaning",
-    "CITY_NAME": "Roma",
-    "BOUNDING_BOX": {
-        "min_lat": 41.6,
-        "max_lat": 42.2,
-        "min_lon": 12.2,
-        "max_lon": 12.8
-    },
-    "USE_GEOFENCE": True #Mettendo a false analizziamo tutto il mondo e non Roma
-}
-
-
-def init_environment():
-    jdk_path = "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
-    if os.path.exists(jdk_path):
-        os.environ["JAVA_HOME"] = jdk_path
-        os.environ["PATH"] = f"{jdk_path}/bin:" + os.environ.get("PATH", "")
-
+from backend.config import ANALYSIS_CONFIG
+from backend.utils import get_spark_session
 
 def run_cleaning_pipeline():
-    init_environment()
     conf = ANALYSIS_CONFIG
 
-    # 1. Spark Session (Case Sensitive Enabled)
-    # Impostiamo 'spark.sql.caseSensitive' a True per evitare l'errore "Column already exists"
-    # se il JSON contiene chiavi miste (es. dateTaken vs DateTaken)
-    spark = SparkSession.builder \
-        .appName(conf["APP_NAME"]) \
-        .master("local[*]") \
-        .config("spark.driver.memory", "4g") \
-        .config("spark.sql.ansi.enabled", "false") \
-        .config("spark.sql.caseSensitive", "true") \
-        .getOrCreate()
+    spark = get_spark_session(conf["APP_NAME"])
 
     spark.sparkContext.setLogLevel("ERROR")
-    print("\n--- AVVIO DATA CLEANING (Fase 2) ---")
+    print("\n" + "=" * 60)
+    print("--- FASE 2: DATA CLEANING ---")
+    print("=" * 60)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    input_path = os.path.join(base_dir, "..", "data", "flickr2x.json")
-    output_path = os.path.join(base_dir, "..", "data", "flickr_cleaned.parquet")
+    input_path = os.path.abspath(os.path.join(base_dir, "..", "..", "data", "flickr2x.json"))
+    output_path = os.path.abspath(os.path.join(base_dir, "..","..", "data", "flickr_cleaned.parquet"))
 
-    # 2. Ingestion
     print(f"Leggo il dataset da: {input_path}")
     if not os.path.exists(input_path):
         print("ERRORE: File di input non trovato.")
         return
 
-    # Lettura standard JSON Lines
+    # Lettura file JSON
     raw_df = spark.read.json(input_path)
     count_raw = raw_df.count()
     print(f"Totale record grezzi trovati: {count_raw}")
 
-    # 3. Gestione Nomi Colonne (Case Sensitivity Strategy)
-    # Cerchiamo se esistono varianti del nome 'dateTaken' nel DataFrame caricato
+    # 3. Nomi Colonne (Case Sensitivity)
     available_columns = raw_df.columns
     print(f"Colonne rilevate (primi 10): {available_columns[:10]}")
 
-    # Creiamo un riferimento sicuro alla colonna data.
-    # Se c'è 'dateTaken' usiamo quella, altrimenti proviamo 'DateTaken' o 'datetaken' se esistono.
+    # Riferimento sicuro alla colonna data.
+    # Se c'è 'dateTaken' uso quella, altrimenti 'DateTaken' o 'datetaken' se esistono.
     def get_col_safe(name_variations):
         for name in name_variations:
             if name in available_columns:
@@ -81,9 +52,9 @@ def run_cleaning_pipeline():
         to_timestamp(target_date_col, fmt_verbose)
     )
 
-    # 5. Flattening & Application
-    # Anche per geoData e owner usiamo la stessa logica difensiva se necessario,
-    # ma lo schema inspection diceva che erano minuscoli, quindi ci fidiamo.
+    # 5. Flattening
+    # Anche per geoData e owner uso la stessa logica difensiva se necessario,
+    # ma dallo schema inspection erano minuscoli, quindi mi fido.
     flat_df = raw_df.select(
         col("id").alias("photo_id"),
         col("owner.id").alias("user_id"),

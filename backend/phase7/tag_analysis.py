@@ -1,30 +1,24 @@
 import os
 import shutil
-from pyspark.sql import SparkSession
+
 from pyspark.sql.functions import col, explode, lower, desc
 
 from pyspark.sql.window import Window
 from pyspark.sql.functions import row_number
 
-def init_environment():
-    jdk_path = "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
-    if os.path.exists(jdk_path):
-        os.environ["JAVA_HOME"] = jdk_path
-        os.environ["PATH"] = f"{jdk_path}/bin:" + os.environ.get("PATH", "")
+from backend.utils import get_spark_session
+
 
 def run_tag_analysis():
-    init_environment()
-    spark = SparkSession.builder \
-        .appName("FlickrFlow_TagAnalysis") \
-        .master("local[*]") \
-        .config("spark.driver.memory", "4g") \
-        .getOrCreate()
+    spark = get_spark_session("FlickrFlow_Phase7_TagAnalysis")
 
     spark.sparkContext.setLogLevel("ERROR")
-    print("\n--- AVVIO ANALISI TAG (NLP) ---")
+    print("\n" + "=" * 60)
+    print("--- AVVIO ANALISI TAG (NLP) ---")
+    print("=" * 60)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    input_path = os.path.join(base_dir, "..", "data", "flickr_enriched.parquet")
+    input_path = os.path.abspath(os.path.join(base_dir, "..", "..","data", "flickr_enriched.parquet"))
     
     if not os.path.exists(input_path):
         print("Errore: Dataset enriched non trovato.")
@@ -42,7 +36,7 @@ def run_tag_analysis():
     exploded_df = roi_df.select("roi", explode(col("tags")).alias("word"))
 
     # 2. Pulizia
-    # Convertiamo in lower case e rimuoviamo caratteri strani
+    # Conversione in lower case e rimuoviamo caratteri strani
     clean_df = exploded_df.withColumn("word", lower(col("word"))) \
         .filter(
         (col("word") != "") & 
@@ -63,7 +57,7 @@ def run_tag_analysis():
         .drop("rank")
 
     # 4. Salvataggio
-    output_path = os.path.join(base_dir, "..", "data", "flickr_roi_tags.parquet")
+    output_path = os.path.abspath(os.path.join(base_dir, "..", "..", "data", "flickr_roi_tags.parquet"))
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
     

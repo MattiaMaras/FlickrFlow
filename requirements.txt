@@ -1,0 +1,11 @@
+pyspark
+pandas
+numpy
+streamlit
+plotly
+pydeck
+matplotlib
+wordcloud
+langchain
+langchain-community
+langchain-ollamarequests

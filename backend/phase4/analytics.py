@@ -1,44 +1,29 @@
 import os
 
-from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, year
 
-
-def init_environment():
-    jdk_path = "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
-    if os.path.exists(jdk_path):
-        os.environ["JAVA_HOME"] = jdk_path
-        os.environ["PATH"] = f"{jdk_path}/bin:" + os.environ.get("PATH", "")
+from backend.utils import get_spark_session
 
 
 def run_analytics():
-    init_environment()
-
-    # Inizializzo la sessione Spark
-    spark = SparkSession.builder \
-        .appName("FlickrFlow_Phase4_Analytics") \
-        .master("local[*]") \
-        .config("spark.driver.memory", "4g") \
-        .getOrCreate()
+    spark = get_spark_session("FlickrFlow_Phase4_Analytics")
 
     spark.sparkContext.setLogLevel("ERROR")
-    print("\n--- FASE 4: ANALYTICS ---")
+    print("\n" + "=" * 60)
+    print("--- FASE 4: ANALYTICS ---")
+    print("=" * 60)
 
-    #percorso del dataset arricchito creato nella Fase 3
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    input_path = os.path.join(base_dir, "..", "data", "flickr_enriched.parquet")
+    input_path = os.path.abspath(os.path.join(base_dir, "..", "..", "data", "flickr_enriched.parquet"))
 
     if not os.path.exists(input_path):
-        print("Errore: Dataset arricchito non trovato.") #da eseguire fase 3
+        print("Errore: Dataset non trovato. Esegui la fase 3")
         return
 
-    # Carico il dataset in formato Parquet (tipi di dato preservati)
     df = spark.read.parquet(input_path)
 
-    # ---Fase 3Bis, ottimizzazione---
-    # Eseguo il caching del DataFrame in memoria.
-    # Poiche' eseguiro' 3 query diverse sullo stesso dataset,
-    # voglio evitare di leggere il file da disco 3 volte.
+    # Caching del DataFrame in memoria.
+    # Poiche' eseguiro' 3 query diverse sullo stesso dataset, voglio evitare di leggere il file da disco 3 volte.
     df.cache()
 
     # Eseguo una count() per forzare la materializzazione della cache ora
@@ -57,9 +42,8 @@ def run_analytics():
 
     # --- QUERY 2: Analisi Temporale (Trend Annuale) ---
     print("\n[QUERY 2] Distribuzione temporale delle foto")
-    # Filtro gli anni > 2000 per escludere i dati con data di default (anno 0001)
-    # mantenuti nella fase di cleaning per non perdere i dati spaziali
-    yearly_trend = df.filter(year(col("timestamp")) > 2000) \
+    # Filtro gli anni >= 2000 per escludere i dati con data di default (anno 0001) mantenuti nella fase di cleaning per non perdere i dati spaziali
+    yearly_trend = df.filter(year(col("timestamp")) > 1999) \
         .groupBy(year(col("timestamp")).alias("anno")) \
         .count() \
         .orderBy("anno")

@@ -1,36 +1,28 @@
 import os
 import shutil
-from pyspark.sql import SparkSession
+
 from pyspark.sql.functions import col, hour, month, dayofweek, date_format, min, max, datediff, count, countDistinct, \
     when, stddev
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.classification import RandomForestClassifier
 from pyspark.ml.evaluation import MulticlassClassificationEvaluator
 
-
-def init_environment():
-    jdk_path = "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
-    if os.path.exists(jdk_path):
-        os.environ["JAVA_HOME"] = jdk_path
-        os.environ["PATH"] = f"{jdk_path}/bin:" + os.environ.get("PATH", "")
+from backend.utils import get_spark_session
 
 
 def run_advanced_features():
-    init_environment()
-    spark = SparkSession.builder \
-        .appName("FlickrFlow_Ultimate_Features") \
-        .master("local[*]") \
-        .config("spark.driver.memory", "4g") \
-        .getOrCreate()
+    spark = get_spark_session("FlickrFlow_Phase5_Features")
 
     spark.sparkContext.setLogLevel("ERROR")
-    print("\n--- AVVIO FEATURE ENGINEERING AVANZATO ---")
+    print("\n" + "=" * 60)
+    print("--- FASE 5: FEATURE ENGINEERING AVANZATO ---")
+    print("=" * 60)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    input_path = os.path.join(base_dir, "..", "data", "flickr_enriched.parquet")
+    input_path = os.path.abspath(os.path.join(base_dir, "..", "..", "data", "flickr_enriched.parquet"))
     df = spark.read.parquet(input_path)
 
-    # 1. FEATURE TEMPORALI (Per pag. Trend)
+    # 1. FEATURE TEMPORALI
     print("1. Estrazione feature temporali...")
     df_time = df.withColumn("hour", hour("timestamp")) \
         .withColumn("month", month("timestamp")) \
@@ -39,11 +31,11 @@ def run_advanced_features():
         .withColumn("year", date_format("timestamp", "yyyy"))
 
     # Salvo dataset temporale
-    trend_output = os.path.join(base_dir, "..", "data", "flickr_time_features.parquet")
+    trend_output = os.path.join(base_dir, "..", "..", "data", "flickr_time_features.parquet")
     if os.path.exists(trend_output): shutil.rmtree(trend_output)
     df_time.write.parquet(trend_output)
 
-    # 2. USER PROFILING (Per pag. Utenti & ML)
+    # 2. USER PROFILING
     print("2. Creazione profili utente complessi...")
 
     # Calcolo metriche base
@@ -52,7 +44,7 @@ def run_advanced_features():
         max("timestamp").alias("last_seen"),
         count("photo_id").alias("total_photos"),
         countDistinct("roi").alias("unique_rois"),
-        # Calcoliamo deviazione standard dell'ora (per vedere se scattano solo di notte o sempre)
+        #deviazione standard dell'ora (per vedere se scattano solo di notte o sempre)
         stddev("hour").alias("hour_stddev")
     )
 
@@ -61,7 +53,11 @@ def run_advanced_features():
         .withColumn("photos_per_day", col("total_photos") / (col("days_active") + 1)) \
         .na.fill(0)
 
-    # Labeling: Local se attivo > 30gg - O se ha visitato > 5 RoI diverse
+    # LABELING:
+    # Un utente è etichettato come rilevante (label = 1.0) se:
+    # - è attivo per un periodo prolungato (>30 giorni) → comportamento stabile (potenziale residente)
+    #   OPPURE
+    # - visita molte Regioni di Interesse (>4) in poco tempo → comportamento esplorativo intenso
     # Aggiungo colonna user_type esplicita per la UI
     user_labeled = user_features.withColumn("label",
                                             when((col("days_active") > 30) | (col("unique_rois") > 4), 1.0).otherwise(
@@ -72,7 +68,7 @@ def run_advanced_features():
                                                          .otherwise("Recurring Visitor")
                                                          )
 
-    # 3. ML CLASSIFICATION (Per pag. Classificazione)
+    # 3. ML CLASSIFICATION
     print("3. Addestramento Modello Classificazione (Random Forest)...")
 
     assembler = VectorAssembler(
@@ -92,7 +88,7 @@ def run_advanced_features():
     print(f"   Accuracy Modello: {acc:.2%}")
 
     # Salvo profili
-    user_output = os.path.join(base_dir, "..", "data", "flickr_user_profiles.parquet")
+    user_output = os.path.abspath(os.path.join(base_dir, "..", "..", "data", "flickr_user_profiles.parquet"))
     if os.path.exists(user_output): shutil.rmtree(user_output)
     user_labeled.write.parquet(user_output)
 

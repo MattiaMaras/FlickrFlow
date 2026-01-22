@@ -1,42 +1,30 @@
 import os
 
-from pyspark.sql import SparkSession
 from pyspark.ml.feature import VectorAssembler
 from pyspark.ml.clustering import KMeans
 from pyspark.ml.evaluation import ClusteringEvaluator
 
-
-def init_environment():
-    jdk_path = "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
-    if os.path.exists(jdk_path):
-        os.environ["JAVA_HOME"] = jdk_path
-        os.environ["PATH"] = f"{jdk_path}/bin:" + os.environ.get("PATH", "")
+from backend.utils import get_spark_session
 
 
 def run_clustering():
-    init_environment()
-
-    # Inizializzo Spark Session
-    spark = SparkSession.builder \
-        .appName("FlickrFlow_Phase5_KMeans") \
-        .master("local[*]") \
-        .config("spark.driver.memory", "4g") \
-        .getOrCreate()
+    spark = get_spark_session("FlickrFlow_Phase5_KMeans")
 
     spark.sparkContext.setLogLevel("ERROR")
-    print("\n--- FASE 5: K-MEANS CLUSTERING ---")
+    print("\n" + "=" * 60)
+    print("--- FASE 5: K-MEANS CLUSTERING ---")
+    print("=" * 60)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    input_path = os.path.join(base_dir, "..", "data", "flickr_enriched.parquet")
+    input_path = os.path.abspath(os.path.join(base_dir, "..", "..","data", "flickr_enriched.parquet"))
+    output_path = os.path.abspath(os.path.join(base_dir, "..", "..", "data", "flickr_clusters.parquet"))
 
     if not os.path.exists(input_path):
-        print("Errore: Dataset non trovato.") #Da eseguire Fase 3 (spatial_enrichment.py)
+        print("Errore: Dataset non trovato. Esegui la fase 3")
         return
 
-    # Carico i dati
     df = spark.read.parquet(input_path)
 
-    # 1. Feature Engineering
     # Spark MLlib richiede che le feature di input siano in una singola colonna di tipo Vector.
     # Uso VectorAssembler per combinare Latitude e Longitude.
     print("Preparo i dati per il Machine Learning (VectorAssembler)...")
@@ -65,13 +53,12 @@ def run_clustering():
     predictions = model.transform(vector_df)
     evaluator = ClusteringEvaluator()
 
-    # Nota: Il calcolo della Silhouette su 2 milioni di punti è molto oneroso (O(N^2)).
     print("Calcolo Silhouette Score...")
     # Uso un sample del 20% per la valutazione per non bloccare il pc per minuti
     silhouette = evaluator.evaluate(predictions.sample(False, 0.2))
     print(f"Silhouette = {silhouette:.4f}")
 
-    # 5. Risultati: I Centroidi
+    # 5. Risultati
     print("\nCentroidi dei Cluster identificati (Lat, Lon):")
     centers = model.clusterCenters()
     for i, center in enumerate(centers):
@@ -81,7 +68,9 @@ def run_clustering():
     print("\nDistribuzione punti per Cluster:")
     predictions.groupBy("prediction").count().orderBy("prediction").show()
 
-    # Cleanup
+    print("Salvo i cluster su disco...")
+    predictions.write.mode("overwrite").parquet(output_path)
+
     vector_df.unpersist()
     spark.stop()
 

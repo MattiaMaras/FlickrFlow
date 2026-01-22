@@ -1,34 +1,28 @@
 import os
-from pyspark.sql import SparkSession
+
 from pyspark.sql.functions import col, lead, desc
 from pyspark.sql.window import Window
 
-def init_environment():
-    jdk_path = "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home"
-    if os.path.exists(jdk_path):
-        os.environ["JAVA_HOME"] = jdk_path
-        os.environ["PATH"] = f"{jdk_path}/bin:" + os.environ.get("PATH", "")
+from backend.utils import get_spark_session
+
 
 def run_prepare_queries():
-    init_environment()
-    spark = SparkSession.builder \
-        .appName("FlickrFlow_QueryPrep") \
-        .master("local[*]") \
-        .config("spark.driver.memory", "4g") \
-        .getOrCreate()
+    spark = get_spark_session("FlickrFlow_Phase7_Query")
 
     spark.sparkContext.setLogLevel("ERROR")
-    print("\n--- PREPARAZIONE VISTE PER DASHBOARD ---")
+
+    print("\n" + "=" * 60)
+    print("--- PREPARAZIONE VISTE PER DASHBOARD ---")
+    print("=" * 60)
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(base_dir, "..", "data")
+    data_dir = os.path.abspath(os.path.join(base_dir, "..", "..", "data"))
     
-    # Input files
     enriched_path = os.path.join(data_dir, "flickr_enriched.parquet")
     profiles_path = os.path.join(data_dir, "flickr_user_profiles.parquet") # Contiene user_type
 
     if not os.path.exists(enriched_path) or not os.path.exists(profiles_path):
-        print("Errore: Dataset mancanti (eseguire feature_engineering.py prima).")
+        print("Errore: Dataset mancanti. Eseguire fasi 3 e 5.")
         return
 
     df = spark.read.parquet(enriched_path)
@@ -48,9 +42,8 @@ def run_prepare_queries():
     
     hourly_view.write.mode("overwrite").parquet(os.path.join(data_dir, "view_hourly_heatmap.parquet"))
 
-    # 2. VIEW: Origin-Destination Matrix (Flussi)
+    # 2. VIEW: Origin-Destination Matrix
     print("2. Generazione Matrice O/D (Flussi)...")
-    # Ordiniamo per utente e tempo
     window_spec = Window.partitionBy("user_id").orderBy("timestamp")
     
     #colonna 'next_roi'
@@ -58,7 +51,7 @@ def run_prepare_queries():
         .select("user_id", "roi", "timestamp", "user_type") \
         .withColumn("next_roi", lead("roi", 1).over(window_spec)) \
         .filter(col("next_roi").isNotNull()) \
-        .filter(col("roi") != col("next_roi")) # Rimuoviamo self-loop immediati
+        .filter(col("roi") != col("next_roi"))
     
     od_matrix = traj_df.groupBy("roi", "next_roi", "user_type") \
         .count() \
